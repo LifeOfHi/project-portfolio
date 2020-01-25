@@ -25,3 +25,5 @@ The consulting firm [Opex Analytics](https://opexanalytics.com/) hosted an analy
 - Provide final model recommendation while addressing limitations and future considerations for improvement
 
 If you would like more details, please check out the [video submission](https://spark.adobe.com/video/NSes6Wi9eP6oY)!
+
+## Project 2: Kings County Housing Prediction Model
