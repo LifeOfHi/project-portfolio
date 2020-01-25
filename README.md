@@ -6,4 +6,4 @@ Welcome, my name is Hari Ilangovan, and in this repository I maintain a living l
 
 **Result - 1st Place Finish in Presentation & Storytelling**
 
-## Kings County Housing Prediction Model
+## [Kings County Housing Prediction Model](https://github.com/LifeOfHi/project-portfolio/tree/master/Project%202%20-%20Housing%20Price%20Analysis)
