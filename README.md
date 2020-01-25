@@ -4,7 +4,7 @@ Welcome, my name is Hari Ilangovan, and in this repository I maintain a living l
 
 ## [1 - Anomaly Detection - Opex Analytics sponsored Case Competition](https://github.com/LifeOfHi/project-portfolio/tree/master/Project%201%20-%20Opex%20Analytics%20Case)
 
-**Result - 1st Place Finish in Presentation & Storytelling**
+**1st Place Finish in Presentation & Storytelling**
 
 ## [2 - Kings County Housing Prediction Model](https://github.com/LifeOfHi/project-portfolio/tree/master/Project%202%20-%20Housing%20Price%20Analysis)
 
