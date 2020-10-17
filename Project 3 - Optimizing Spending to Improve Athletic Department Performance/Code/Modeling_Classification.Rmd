@@ -1,0 +1,347 @@
+---
+title: "ISYE 7406 Project"
+author: "Saharsh Chordia"
+date: "TBD"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+```
+
+# A. Read in Data
+
+```{r echo=T, results='hide', warning=FALSE}
+data <- read.csv(file = "7406_Project_Data_Div_updated_3quants.csv")
+
+data$quartile <- data$quantiles
+
+#data$quartile <- ntile(data$Total.Points, 3)
+
+data$quartile <- as.factor(data$quartile)
+
+#length(which(data$quartile == 1))
+#length(which(data$quartile == 2))
+#length(which(data$quartile == 3))
+```
+
+
+```{r}
+library(ggplot2)
+library(ggExtra)
+#theme_set(theme_bw()) # pre-set the black-white theme
+```
+
+```{r}
+par(mfrow=c(3,2))
+plot(data$quartile,data$Medical, xlab = 'quartile', ylab='Medical')
+plot(data$quartile,data$Recruiting, xlab = 'quartile', ylab='Recruiting')
+plot(data$quartile,data$Facilities.and.Equipment, xlab = 'quartile', ylab='Facilities')
+plot(data$quartile,data$Athletic.Student.Aid, xlab = 'quartile', ylab='Athletic Student Aid')
+plot(data$quartile,data$Donor.Contributions, xlab = 'quartile', ylab='Donor Contributions')
+plot(data$quartile,data$Ticket.Sales, xlab = 'quartile', ylab='Ticket Sales')
+```
+
+
+```{r}
+#Normalizing by number of students
+data_norm <- data
+for (i in 1:nrow(data)) {
+  for (j in 3:17) {
+    data_norm[i,j] <- data[i,j] / data[i, 15]  
+  }
+}
+
+#Remove UGDS from dataset
+data_norm <- subset(data_norm, select = -c(UGDS,Total.Points,quantiles))
+head(data_norm)
+```
+
+
+# B. Split Data into train and test set - data_norm
+```{r echo=T, results='hide', warning=FALSE}
+#Split data between train and test
+
+set.seed(1021)
+n = dim(data_norm)[1] ### total number of observations
+n1 = round(n/5) ### number of observations randomly selected for testing data - using 20%
+flag = sort(sample(1:n, n1))
+data_norm.train = data_norm[-flag,]; data_norm.test = data_norm[flag,]
+```
+
+## Random Forest
+
+
+# Tune Random Forest based on test error
+```{r}
+library(randomForest)
+
+train_q <- data_norm.train[3:18]
+test_q <- data_norm.test[,3:18]
+#head(train_q)
+#colnames(train_q)
+
+# Tuning the forest
+#features <- colnames(train_q[, -c(16)])
+
+hyper_grid <- expand.grid(
+  mtry       = seq(4, 12, by = 1),
+  node_size  = seq(3, 9, by = 2),
+  #sampe_size = c(.55, .632, .70, .80),
+  num_trees = c(500, 1000, 1500, 2000, 2500),
+  test_error   = 0
+)
+
+# total number of combinations
+nrow(hyper_grid)
+
+for(i in 1:nrow(hyper_grid)) {
+  
+  rf.m1 <- randomForest(formula = quartile ~ ., data = train_q, ntree = hyper_grid$num_trees[i], mtry = hyper_grid$mtry[i], nodesize = hyper_grid$node_size[i])
+  
+  pred.rf <- predict(rf.m1, test_q[, -c(16)])
+  TE.rf <- mean(pred.rf != data_norm.test$quartile)
+  hyper_grid$test_error[i] <- TE.rf
+}
+
+```
+
+```{r}
+hyper_grid %>% 
+  dplyr::arrange(test_error) %>%
+  head(10)
+
+# 10	3	500	0.2872340
+```
+
+
+
+## Naive Bayesian
+```{r}
+library(e1071)
+fit3 <- naiveBayes(quartile~.,data = data_norm.train[3:18])
+test_error_NB<-mean( predict(fit3,data_norm.test[,3:17]) != data_norm.test$quartile) 
+test_error_NB
+```
+
+
+## Neural Net
+```{r}
+library(nnet)
+library(e1071)
+
+model1 <- tune.nnet(quartile ~ ., data = data_norm.train[,4:18], size =10:15, decay = c(0,0.1, 0.01, 0.001));
+summary(model1)
+
+plot(model1);
+model1$best.model
+
+model.nn<-nnet(quartile~.,data = data_norm.train[,3:18],size =11,decay=0.001)
+pred.nn<- predict(model.nn,data_norm.test[,3:17],type="class")
+test_error_nnet<-mean(pred.nn != data_norm.test$quartile)
+test_error_nnet
+
+
+```
+
+
+## knn
+```{r}
+library(kknn)
+
+min_error_knn <- 100
+k_best <- 0
+
+
+data_knn_train <- data_norm.train
+data_knn_train$NCAA.Subdivision <- as.numeric(data_knn_train$NCAA.Subdivision)
+
+data_knn_test <- data_norm.test
+data_knn_test$NCAA.Subdivision <- as.numeric(data_knn_test$NCAA.Subdivision)
+
+
+for (number in seq(1, 15, 1)) {
+  our_knn <- kknn(quartile ~ ., data_knn_train[, 3:18], data_knn_test[,3:17], k = number, scale = TRUE)
+    
+  x <- fitted(our_knn)
+  knn_error <- sum(x != data_knn_test$quartile) / nrow(data_knn_test)
+  
+  print(sprintf("the test error at k = %.0f is: %f", number, knn_error))
+  
+  if (knn_error < min_error_knn) {
+    min_error_knn <- knn_error
+    k_best <- number
+  }
+  
+}
+
+min_error_knn
+k_best
+```
+
+
+## SVM
+```{r}
+library(kernlab)
+# Find the suitable order of magnitude for C-parameter
+accuracy_vector_1 <- c()
+c_values <- c()
+i <- 0.001
+while (i <= 1000) {
+  model <- ksvm(quartile ~ ., data = data_norm.train[,3:18], type = "C-svc", kernel = "rbfdot", C = i, scaled = TRUE)
+  pred <- predict(model, data_norm.test[,3:17])
+  accuracy <- sum(pred == data_norm.test$quartile) / nrow(data_norm.test)
+  accuracy_rounded <- round(accuracy, digits = 5)
+  
+  accuracy_vector_1 <- c(accuracy_vector_1, accuracy_rounded)
+  c_values <- c(c_values, i)
+  
+  cat("C = ", toString(i), "gives", toString(accuracy_rounded*100), "% accuracy!\n")
+  cat("\n")
+  i <- i*10
+}
+
+
+# 1- 100
+```
+
+
+```{r}
+#set.seed(1021)
+library(kernlab)
+c_values1 <- seq(1, 30, by = 1) #Checked values above 30 also, but the error was much higher
+c_values2 <- c(0.1)
+c_values <- c(c_values1, c_values2)
+methods_frame <- data.frame(c_values)
+
+kernel_methods <- c("rbfdot", "polydot", "vanilladot", "tanhdot", "splinedot") 
+
+max_accuracy <- 0
+best_method <- "unknown"
+c_best <- 0
+
+for (k in kernel_methods) {
+  
+  acc_method <- c()
+  
+  #cat("OK, let's go with", toString(k), "now")
+  #cat("\n")
+  
+ 
+ for (i in c_values) {
+    model <- ksvm(quartile ~ ., data = data_norm.train[,3:18], type = "C-svc", kernel = k, C = i, scaled = TRUE)
+    pred <- predict(model, data_norm.test[,3:17])
+    
+    accuracy <- sum(pred == data_norm.test$quartile) / nrow(data_norm.test)
+    accuracy_rounded <- round(accuracy, digits = 5)
+    
+    acc_method <- c(acc_method, accuracy_rounded)
+    
+    #cat("C = ", toString(i), "gives", toString(accuracy_rounded*100), "% accuracy!\n")
+    #cat("\n")
+    
+    if (accuracy_rounded > max_accuracy) {
+      max_accuracy <- accuracy_rounded
+      best_method <- k
+      c_best <- i
+    }
+    
+  }
+  
+  methods_frame[k] <- acc_method
+}
+
+cat("The best method is", best_method, "for C equal to", toString(c_best), "with accuracy", toString(max_accuracy*100), "% !")
+
+```
+
+
+
+
+
+```{r}
+# Create a plot summarizing the results
+methods_frame
+methods_frame2 <- methods_frame
+methods_frame2[, 2:6] <- methods_frame2[, 2:6]*100
+
+library(reshape2)
+methods <- melt(methods_frame2, id.vars = "c_values")
+
+theme_update(plot.title = element_text(hjust = 0.5))
+
+ggplot(methods, aes((c_values), value, col = variable)) + geom_line(size  = 1) + 
+  labs(x = "Value of C", y = "Accuracy") + labs(color='Kernel') +  ylab("Prediction Accuracy (%)\n") +
+  ggtitle("Accuracy of Kernel methods for different values of C\n") + theme_grey(base_size = 15) +
+  scale_colour_manual(values = c("red", "yellow", "forestgreen", "deeppink", "orange"))
+                                 #"yellow", "gray48", "purple")) 
+
+```
+
+
+
+
+# Monte Carlo Cross-Validation
+```{r echo=T, results='hide', warning=FALSE}
+set.seed(1021)
+B = 100
+TEALL = NULL
+
+for (i in seq(1,B,1)){
+  
+  n = dim(data_norm)[1] ### total number of observations
+  n1 = round(n/5) ### number of observations randomly selected for testing data - using 20%
+  set.seed(i) ### set the seed for randomization
+  flag = sort(sample(1:n, n1))
+  data_norm.train.monte = data_norm[-flag,]
+  data_norm.test.monte = data_norm[flag,]
+
+
+#True Y values for Test set
+ytrue <- data_norm.test.monte$quartile
+
+
+
+#Naive Bayes Model
+
+model1 <- naiveBayes(quartile~.,data = data_norm.train.monte[3:18])
+naive.error <- mean(predict(model1,data_norm.test.monte[,3:17]) != ytrue)
+
+
+
+
+#KNN Model
+data_knn_train <- data_norm.train.monte
+data_knn_train$NCAA.Subdivision <- as.numeric(data_knn_train$NCAA.Subdivision)
+
+data_knn_test <- data_norm.test.monte
+data_knn_test$NCAA.Subdivision <- as.numeric(data_knn_test$NCAA.Subdivision)
+
+#model2 <- knn(train=data_knn_train[,3:17],test = data_knn_test[,3:17],cl = data_knn_train[,18],k = 14)
+#TE_KNN <-c(TE_KNN, mean(model2 != ytrue))
+
+model2 <- kknn(quartile ~ ., data_knn_train[, 3:18], data_knn_test[,3:17], k = 5 , scale = TRUE)
+x <- fitted(model2)
+knn_error <- mean(x != ytrue)
+
+
+#RF Model
+model3 <- randomForest(formula = quartile ~ ., data = data_norm.train.monte[3:18], ntree = 500, mtry = 4, nodesize = 3)
+rf.error <- mean(predict(model3, data_norm.test.monte[3:17]) != ytrue)
+
+
+
+#SVM
+model4 <- ksvm(quartile ~ ., data = data_norm.train.monte[,3:18], C = 8, kernel = "rbfdot")
+pred.svm.monte <-predict(model4, data_norm.test.monte[,3:17])
+test_error_svm<-mean(pred.svm.monte != ytrue)
+
+
+TEALL = rbind(TEALL, cbind(naive.error, knn_error, rf.error, test_error_svm))
+
+}
+
+dim(TEALL)
+apply(TEALL, 2, mean)
+round(apply(TEALL, 2, var), 9)
+```
